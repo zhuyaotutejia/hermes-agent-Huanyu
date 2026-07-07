@@ -98,6 +98,7 @@ models-dev-upstream/
 
 # Local editor / agent tooling (machine-specific; keep in global config, not the repo)
 .codex/
+.claude/
 .cursor/
 .gemini/
 .zed/
@@ -144,3 +145,6 @@ apps/desktop/demo/
 # PR body is the archive. See the hermes-agent-dev skill's
 # pr-infographic-workflow reference (storage rule + lapse #8 / #COMMIT-1).
 infographic/
+
+# GitNexus local index cache
+.gitnexus/
