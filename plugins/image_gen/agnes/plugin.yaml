@@ -1,0 +1,5 @@
+name: agnes
+version: 1.0.0
+description: "Agnes image generation backend (agnes-image-2.1-flash). Supports text-to-image and image-to-image via the Agnes AI API hub."
+author: Huanyu
+kind: backend
