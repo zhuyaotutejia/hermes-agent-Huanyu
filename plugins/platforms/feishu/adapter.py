@@ -115,6 +115,46 @@ try:
     from lark_oapi.ws import Client as FeishuWSClient
 
     FEISHU_AVAILABLE = True
+
+    # Monkey-patch lark's Transport.execute with SSL retry.
+    # On Windows (Python 3.12 + OpenSSL 3.0.x), the first 1-2 TLS handshakes to
+    # open.feishu.cn intermittently fail with SSLEOFError (UNEXPECTED_EOF_WHILE_READING)
+    # — likely SNI-based interference that stabilises once the urllib3 connection
+    # pool warms up. lark_oapi's transport has zero retry, so every transient EOF
+    # surfaces as a hard Send failure. Wrap execute() with up to 3 retries on
+    # requests.exceptions.SSLError / ConnectionError; subsequent attempts reuse
+    # the warmed pool and almost always succeed.
+    import functools as _functools
+    import logging as _logging
+
+    _lark_transport_log = _logging.getLogger("feishu_lark_transport_patch")
+
+    _ORIGINAL_LARK_EXECUTE = None
+
+    def _patched_lark_execute(conf, req, option=None):
+        global _ORIGINAL_LARK_EXECUTE
+        import requests.exceptions as _rexc
+
+        last_exc = None
+        for attempt in range(1, 4):
+            try:
+                return _ORIGINAL_LARK_EXECUTE(conf, req, option)
+            except (_rexc.SSLError, _rexc.ConnectionError) as exc:
+                last_exc = exc
+                _lark_transport_log.warning(
+                    "lark Transport.execute attempt %d/3 failed (%s); retrying",
+                    attempt, type(exc).__name__,
+                )
+                import time as _time
+                _time.sleep(0.8 * attempt)
+        raise last_exc
+
+    import lark_oapi.core.http.transport as _lark_transport_mod
+
+    if _ORIGINAL_LARK_EXECUTE is None:
+        _ORIGINAL_LARK_EXECUTE = _lark_transport_mod.Transport.execute
+        _lark_transport_mod.Transport.execute = staticmethod(_patched_lark_execute)
+        _lark_transport_log.info("Patched lark_oapi Transport.execute with SSL retry (3 attempts)")
 except ImportError:
     FEISHU_AVAILABLE = False
     lark = None  # type: ignore[assignment]
