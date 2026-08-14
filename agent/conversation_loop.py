@@ -62,6 +62,7 @@ from agent.retry_utils import (
     adaptive_rate_limit_backoff,
     is_zai_coding_overload_error,
     jittered_backoff,
+    parse_retry_after_seconds,
     zai_coding_overload_retry_ceiling,
 )
 from agent.trajectory import has_incomplete_scratchpad
@@ -4091,22 +4092,19 @@ def run_conversation(
                         "failure_reason": classified.reason.value,
                     }
 
-                # For rate limits, respect the Retry-After header if present
+                # For rate limits, respect the Retry-After header if present.
+                # Centralized via parse_retry_after_seconds (ported from
+                # v0.20.1): handles numeric, HTTP-date, and headers-mapping
+                # shapes, then we cap at 10 minutes (600s covers all realistic
+                # provider reset windows while rejecting pathological values;
+                # Anthropic Tier 1 buckets reset in ~171s, so a 120s cap caused
+                # premature retries that re-tripped the limit. #26293).
                 _retry_after = None
                 if is_rate_limited:
                     _resp_headers = getattr(getattr(api_error, "response", None), "headers", None)
-                    if _resp_headers and hasattr(_resp_headers, "get"):
-                        _ra_raw = _resp_headers.get("retry-after") or _resp_headers.get("Retry-After")
-                        if _ra_raw:
-                            try:
-                                # Cap at 10 minutes. Anthropic Tier 1 input-token
-                                # buckets reset in ~171s, so a 120s cap caused us to
-                                # retry before the actual reset window and re-trip the
-                                # limit. 600s covers all realistic provider reset
-                                # windows while still rejecting pathological values. (#26293)
-                                _retry_after = min(float(_ra_raw), 600)
-                            except (TypeError, ValueError):
-                                pass
+                    _parsed = parse_retry_after_seconds(_resp_headers if _resp_headers else None)
+                    if _parsed is not None:
+                        _retry_after = min(_parsed, 600)
                 wait_time = _retry_after if _retry_after else jittered_backoff(retry_count, base_delay=2.0, max_delay=60.0)
                 _backoff_policy = None
                 if (is_rate_limited or _is_zai_coding_overload) and not _retry_after:

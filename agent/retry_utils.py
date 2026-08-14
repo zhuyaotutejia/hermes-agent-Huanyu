@@ -8,7 +8,9 @@ rate-limited provider concurrently.
 import random
 import threading
 import time
-from typing import Any
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
+from typing import Any, Optional
 
 # Monotonic counter for jitter seed uniqueness within the same process.
 # Protected by a lock to avoid race conditions in concurrent retry paths
@@ -31,6 +33,58 @@ _ZAI_CODING_OVERLOAD_LONG_BACKOFF = (30.0, 60.0, 90.0, 120.0)
 # long-tier entry is reachable). Keeping it a single module constant prevents
 # the two from silently desyncing if the short-retry count is ever tuned.
 _ZAI_CODING_OVERLOAD_SHORT_ATTEMPTS = 3
+
+
+def parse_retry_after_seconds(value_or_headers: Any) -> Optional[float]:
+    """Parse a ``Retry-After`` value into non-negative seconds.
+
+    Accepts either a raw header value (numeric string / HTTP-date / number)
+    or a headers mapping, in which case the ``Retry-After`` key is looked up
+    case-insensitively (``.get`` on dict-like objects tries both common
+    casings; real HTTP header containers like httpx/requests are already
+    case-insensitive).
+
+    Returns:
+        Seconds as a ``float`` (negative deltas clamped to ``0.0``), or
+        ``None`` when the header is absent or unparseable.
+    """
+    raw = value_or_headers
+    if raw is not None and not isinstance(raw, (str, int, float)):
+        # Looks like a headers mapping — pull the header out of it.
+        getter = getattr(raw, "get", None)
+        if callable(getter):
+            try:
+                value = getter("Retry-After")
+                if value is None:
+                    value = getter("retry-after")
+            except Exception:
+                return None
+            raw = value
+        else:
+            return None
+    if raw is None:
+        return None
+    if isinstance(raw, bool):
+        return None
+    if isinstance(raw, (int, float)):
+        return max(0.0, float(raw))
+    text = str(raw).strip()
+    if not text:
+        return None
+    try:
+        return max(0.0, float(text))
+    except (TypeError, ValueError):
+        pass
+    # HTTP-date form (RFC 7231): seconds until that instant, clamped at 0.
+    try:
+        when = parsedate_to_datetime(text)
+    except (TypeError, ValueError):
+        return None
+    if when is None:
+        return None
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=timezone.utc)
+    return max(0.0, (when - datetime.now(timezone.utc)).total_seconds())
 
 
 def jittered_backoff(
@@ -89,9 +143,13 @@ def is_zai_coding_overload_error(*, base_url: str | None, model: str | None, err
     """Return True for Z.AI Coding Plan transient overload 429s.
 
     The coding-plan endpoint reports overload as HTTP 429 with body code 1305
-    and message "The service may be temporarily overloaded...". Treat only
-    that narrow shape specially so ordinary quota/billing 429s still fail fast
-    through the existing classifier.
+    and message "The service may be temporarily overloaded..." (global
+    ``api.z.ai``) or "该模型当前访问量过大..." (China ``open.bigmodel.cn``).
+    Both carry code 1305 in the body. Treat only that narrow shape specially
+    so ordinary quota/billing 429s still fail fast through the existing
+    classifier. The path segment ``/api/coding/paas/v4`` is shared by both the
+    global and China coding-plan endpoints, so matching it (rather than a
+    specific host) covers both.
     """
     base = (base_url or "").lower()
     model_name = (model or "").lower()
@@ -99,7 +157,7 @@ def is_zai_coding_overload_error(*, base_url: str | None, model: str | None, err
     text = _error_text(error)
     return (
         status == 429
-        and "api.z.ai/api/coding/paas/v4" in base
+        and "/api/coding/paas/v4" in base
         and "glm-5.2" in model_name
         and ("1305" in text or "temporarily overloaded" in text)
     )

@@ -139,6 +139,18 @@ def test_zai_coding_overload_classifier_is_narrow():
         error=err,
     )
 
+    # China coding-plan endpoint (open.bigmodel.cn) uses the same /api/coding/
+    # paas/v4 path and the same body code 1305, just a Chinese message.
+    cn_err = SimpleNamespace(
+        status_code=429,
+        body={"error": {"code": "1305", "message": "该模型当前访问量过大，请您稍后再试"}},
+    )
+    assert is_zai_coding_overload_error(
+        base_url="https://open.bigmodel.cn/api/coding/paas/v4",
+        model="glm-5.2",
+        error=cn_err,
+    )
+
     assert not is_zai_coding_overload_error(
         base_url="https://api.z.ai/api/paas/v4",
         model="glm-5.2",
@@ -258,3 +270,23 @@ def test_zai_overload_ceiling_makes_long_tier_reachable(monkeypatch):
 
     assert long_waits, "long-backoff tier never reached within the retry ceiling"
     assert long_waits == [30.0, 60.0, 90.0, 120.0]
+
+
+def test_parse_retry_after_seconds():
+    from agent.retry_utils import parse_retry_after_seconds
+    assert parse_retry_after_seconds(None) is None
+    assert parse_retry_after_seconds("") is None
+    assert parse_retry_after_seconds("30") == 30.0
+    assert parse_retry_after_seconds(15) == 15.0
+    assert parse_retry_after_seconds(True) is None  # bool guard
+    # headers mapping (both casings)
+    assert parse_retry_after_seconds({"Retry-After": "10"}) == 10.0
+    assert parse_retry_after_seconds({"retry-after": "20"}) == 20.0
+    assert parse_retry_after_seconds({"content-type": "json"}) is None
+    # unparseable -> None
+    assert parse_retry_after_seconds("not-a-date") is None
+    # negative-delta HTTP-date clamped to 0
+    from email.utils import format_datetime
+    from datetime import datetime, timezone, timedelta
+    past = format_datetime(datetime.now(timezone.utc) - timedelta(seconds=60))
+    assert parse_retry_after_seconds(past) == 0.0

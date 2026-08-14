@@ -1352,6 +1352,29 @@ def try_activate_fallback(agent, reason: "FailoverReason | None" = None) -> bool
             agent._transport_cache.clear()
         agent._fallback_activated = True
 
+        # Re-resolve reasoning_config for the new fallback model (ported from
+        # v0.20.1, Closes #21256). Per-model override (agent.reasoning_overrides)
+        # wins over the global agent.reasoning_effort, so the fallback model
+        # gets its own reasoning profile instead of inheriting the primary's.
+        # Wrapped in try/except because a config load failure must not kill the
+        # swap.
+        try:
+            from hermes_constants import resolve_reasoning_config
+            from hermes_cli.config import load_config
+
+            agent.reasoning_config = resolve_reasoning_config(
+                load_config() or {}, agent.model
+            )
+            logger.info(
+                "Fallback %s: reasoning_config resolved: %s",
+                agent.model, agent.reasoning_config,
+            )
+        except Exception as _reasoning_err:
+            logger.debug(
+                "Failed to resolve reasoning_config for fallback %s; keeping current: %s",
+                agent.model, _reasoning_err,
+            )
+
         # Rebind the credential pool to the fallback provider when the provider
         # changes.  Keeping the primary pool attached would make downstream
         # recovery (rate_limit / billing / auth) mutate the wrong credential

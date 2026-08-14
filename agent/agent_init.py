@@ -591,6 +591,18 @@ def init_agent(
     
     # Model response configuration
     agent.max_tokens = max_tokens  # None = use model default
+    # reasoning_config: when the caller didn't pass an explicit one, resolve
+    # from config.yaml so per-model overrides (agent.reasoning_overrides) and
+    # the global agent.reasoning_effort both take effect. (Ported from v0.20.1
+    # resolve_reasoning_config chokepoint — per-model optimization.)
+    if reasoning_config is None:
+        try:
+            from hermes_constants import resolve_reasoning_config
+            from hermes_cli.config import load_config
+
+            reasoning_config = resolve_reasoning_config(load_config() or {}, model)
+        except Exception:
+            reasoning_config = None
     agent.reasoning_config = reasoning_config  # None = use default (medium for OpenRouter)
     agent.service_tier = service_tier
     agent.request_overrides = dict(request_overrides or {})
