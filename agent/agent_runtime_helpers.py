@@ -672,6 +672,19 @@ def strip_think_blocks(agent, content: str) -> str:
         content,
         flags=re.DOTALL | re.IGNORECASE,
     )
+    # 2b. Incomplete reasoning tag — stream truncated mid-tag (e.g. the
+    #     model started emitting <think> but the connection dropped after
+    #     '<think' before '>' arrived). Without this, the 6-char fragment
+    #     '<think' survives all prior passes and gets sent to the user as
+    #     the response.  Matches incomplete opening tags at start-of-text
+    #     or after a newline that are followed by end-of-string or
+    #     whitespace (so prose like 'I think...' is never touched).
+    content = re.sub(
+        r'(?:^|\n)[ \t]*<(?:think|thinking|reasoning|thought|REASONING_SCRATCHPAD)\s*$',
+        '',
+        content,
+        flags=re.DOTALL | re.IGNORECASE,
+    )
     # 3. Stray orphan open/close tags that slipped through.
     content = re.sub(
         r'</?(?:think|thinking|reasoning|thought|REASONING_SCRATCHPAD)>\s*',

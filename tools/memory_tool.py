@@ -772,7 +772,13 @@ class MemoryStore:
                 dir=str(path.parent), suffix=".tmp", prefix=".mem_"
             )
             try:
-                with os.fdopen(fd, "w", encoding="utf-8") as f:
+                # newline="" keeps ENTRY_DELIMITER (LF + section sign + LF)
+                # as-is on every platform. The default maps LF to os.linesep
+                # on Windows, silently turning every LF into CRLF on disk and
+                # breaking the next read's LF split — the whole store then
+                # collapses to a single entry until the user manually
+                # normalizes line endings.
+                with os.fdopen(fd, "w", encoding="utf-8", newline="") as f:
                     f.write(content)
                     f.flush()
                     os.fsync(f.fileno())
