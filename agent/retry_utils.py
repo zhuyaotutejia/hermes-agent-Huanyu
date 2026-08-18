@@ -158,7 +158,11 @@ def is_zai_coding_overload_error(*, base_url: str | None, model: str | None, err
     return (
         status == 429
         and "/api/coding/paas/v4" in base
-        and "glm-5.2" in model_name
+        and any(
+            token in model_name
+            # glm-5.2 / glm-5.3 canonical + relay spellings (glm-5-2, glm-5p2)
+            for token in ("glm-5.2", "glm-5-2", "glm-5p2", "glm-5.3", "glm-5-3", "glm-5p3")
+        )
         and ("1305" in text or "temporarily overloaded" in text)
     )
 

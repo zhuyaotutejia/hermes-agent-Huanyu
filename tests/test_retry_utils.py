@@ -151,6 +151,18 @@ def test_zai_coding_overload_classifier_is_narrow():
         error=cn_err,
     )
 
+    # glm-5.3 (coding-plan successor) gets the same adaptive backoff.
+    assert is_zai_coding_overload_error(
+        base_url="https://open.bigmodel.cn/api/coding/paas/v4",
+        model="glm-5.3",
+        error=cn_err,
+    )
+    assert is_zai_coding_overload_error(
+        base_url="https://api.z.ai/api/coding/paas/v4",
+        model="glm-5.3",
+        error=err,
+    )
+
     assert not is_zai_coding_overload_error(
         base_url="https://api.z.ai/api/paas/v4",
         model="glm-5.2",

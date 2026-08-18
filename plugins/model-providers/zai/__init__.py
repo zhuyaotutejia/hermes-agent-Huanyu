@@ -46,23 +46,32 @@ def _model_supports_thinking(model: str | None) -> bool:
     return (major, minor) >= (4, 5)
 
 
-def _is_glm_5_2(model: str | None) -> bool:
-    """Detect GLM-5.2 across the alias spellings providers use.
+def _glm_supports_native_reasoning_effort(model: str | None) -> bool:
+    """Detect GLM-5.2/5.3 across the alias spellings providers use.
 
-    Covers the canonical ``glm-5.2`` plus the ``glm-5-2`` / ``glm-5p2``
-    variants seen on relays (Fireworks ``glm-5p2``, etc.) and any
-    vendor-prefixed form (``z-ai/glm-5.2``, ``zai-org-glm-5-2``).
+    Covers the canonical ``glm-5.2``/``glm-5.3`` plus the ``glm-5-2`` /
+    ``glm-5p2`` (and 5-3/5p3) variants seen on relays (Fireworks
+    ``glm-5p2``, etc.) and any vendor-prefixed form (``z-ai/glm-5.2``,
+    ``zai-org-glm-5-2``). Both models expose the same two-level native
+    ``reasoning_effort`` knob on the coding-plan endpoints (verified live:
+    reasoning_effort=high/max both HTTP 200 on 5.2 and 5.3).
     """
     m = (model or "").strip().lower()
     if not m:
         return False
-    return any(token in m for token in ("glm-5.2", "glm-5-2", "glm-5p2"))
+    return any(
+        token in m
+        for token in (
+            "glm-5.2", "glm-5-2", "glm-5p2",
+            "glm-5.3", "glm-5-3", "glm-5p3",
+        )
+    )
 
 
-def _glm_5_2_reasoning_effort(reasoning_config: dict | None) -> str | None:
-    """Map Hermes reasoning effort onto GLM-5.2's native ``high``/``max``.
+def _glm_native_reasoning_effort(reasoning_config: dict | None) -> str | None:
+    """Map Hermes reasoning effort onto GLM's native ``high``/``max``.
 
-    GLM-5.2 only supports two enabled effort levels. ``xhigh``/``max``
+    GLM-5.2/5.3 only support two enabled effort levels. ``xhigh``/``max``
     request the top tier; everything else that is enabled requests ``high``
     (its minimum thinking level). When reasoning is explicitly disabled, or
     no effort preference is supplied, the server default is left untouched.
@@ -91,7 +100,7 @@ class ZaiProfile(ProviderProfile):
         extra_body: dict[str, Any] = {}
         top_level: dict[str, Any] = {}
 
-        if not _model_supports_thinking(model) and not _is_glm_5_2(model):
+        if not _model_supports_thinking(model) and not _glm_supports_native_reasoning_effort(model):
             return extra_body, top_level
 
         # Only emit when the user expressed a preference; omitting the field
@@ -100,8 +109,8 @@ class ZaiProfile(ProviderProfile):
             enabled = reasoning_config.get("enabled") is not False
             extra_body["thinking"] = {"type": "enabled" if enabled else "disabled"}
 
-        if _is_glm_5_2(model):
-            effort = _glm_5_2_reasoning_effort(reasoning_config)
+        if _glm_supports_native_reasoning_effort(model):
+            effort = _glm_native_reasoning_effort(reasoning_config)
             if effort is not None:
                 top_level["reasoning_effort"] = effort
 
@@ -116,6 +125,7 @@ zai = ZaiProfile(
     description="Z.AI / GLM — Zhipu AI models",
     signup_url="https://z.ai/",
     fallback_models=(
+        "glm-5.3",
         "glm-5.2",
         "glm-5",
         "glm-4-9b",
